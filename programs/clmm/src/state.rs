@@ -1,10 +1,9 @@
 use anchor_lang::prelude::*;
-#[derive(Debug)]
+#[derive(Debug,InitSpace)]
+#[account]
 pub struct Pool{
     pub minta:Pubkey,
     pub mintb:Pubkey,
-    pub vault_a:Pubkey,
-    pub vault_b:Pubkey,
     pub lp_mint:Pubkey,
     pub pool_authority:Pubkey,
     pub sqrt_price:u128,
