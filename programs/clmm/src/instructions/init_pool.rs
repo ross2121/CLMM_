@@ -28,7 +28,7 @@ impl <'info> InitializePool<'info> {
       pub fn initializepool(ctx:Context<InitializePool>,price:u64)->Result<()>{
              let curr_sqrt_price=price_to_sqrt_price_x64(price)?;
              let current_tick=sqrt_price_x64_to_tick(curr_sqrt_price);
-             let mut pool=ctx.accounts.config;
+             let  pool=&mut ctx.accounts.config;
              pool.minta=ctx.accounts.minta.key();
              pool.mintb=ctx.accounts.mintb.key();
              pool.lp_mint=ctx.accounts.lp_mint.key();
@@ -38,10 +38,6 @@ impl <'info> InitializePool<'info> {
               pool.current_tick=current_tick.unwrap();
               pool.active_liqiudity=0;
               pool.sqrt_price=curr_sqrt_price;
-              
-
-             
-
              Ok(())
 
       }

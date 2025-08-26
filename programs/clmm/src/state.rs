@@ -15,7 +15,9 @@ pub struct Pool{
     pub bump:u8,
     pub padding:[u8;3],
 }
+#[derive(Debug,InitSpace)]
 #[account]
+
 pub struct  tick{
     pub sqrt_price_x64:u128,
     pub liquidity:i128,
