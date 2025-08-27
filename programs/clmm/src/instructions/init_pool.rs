@@ -14,11 +14,11 @@ pub minta:InterfaceAccount<'info, Mint>,
 pub mintb:InterfaceAccount<'info, Mint>,
 #[account(init,seeds=[b"lp",config.key().as_ref()],bump,payer=signer,mint::decimals=6,mint::authority=config)]
 pub lp_mint:InterfaceAccount<'info, Mint>,
-#[account(init,associated_token::mint=minta,associated_token::authority=signer,payer=signer)]
+#[account(init,associated_token::mint=minta,associated_token::authority=config,payer=signer)]
 pub vaulta:InterfaceAccount<'info, TokenAccount>,
 #[account(init,seeds=[b"config",signer.key().as_ref()],bump,payer=signer,space=8+Pool::INIT_SPACE)]
 pub config:Account<'info,Pool>,
-#[account(init,associated_token::mint=mintb,associated_token::authority=signer,payer=signer)]
+#[account(init,associated_token::mint=mintb,associated_token::authority=config,payer=signer)]
 pub  vault_b:InterfaceAccount<'info, TokenAccount>,
 pub system_program:Program<'info,System>,
 pub token_program:Interface<'info, TokenInterface>,
