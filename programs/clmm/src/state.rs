@@ -10,6 +10,7 @@ pub struct Pool{
     pub active_liquidity:u128,
     pub total_lp_liqidity:u128,
     pub active_liqiudity:u128,
+    pub seed:u64,
     pub total_lp_issued:u64,
     pub current_tick:i32,
     pub bump:u8,

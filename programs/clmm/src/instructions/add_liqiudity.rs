@@ -24,7 +24,7 @@ pub struct Liquidity<'info>{
      pub user_lp_account:InterfaceAccount<'info,TokenAccount> ,
     #[account(init,associated_token::mint=minta,associated_token::authority=config,payer=signer)]
     pub vaulta:InterfaceAccount<'info, TokenAccount>,
-    #[account(mut,seeds=[b"config",signer.key().as_ref()],bump)]
+    #[account(mut,seeds=[b"config",config.seed.to_le_bytes().as_ref()],bump)]
     pub config:Account<'info,Pool>,
     #[account(mut,associated_token::mint=mintb,associated_token::authority=config)]
     pub  vault_b:InterfaceAccount<'info, TokenAccount>,
@@ -99,13 +99,16 @@ impl <'info> Liquidity<'info> {
 
 
     };
+    let seed=pool.seed.to_be_bytes();
+   let seeds:&[&[u8]]=&[b"config",seed.as_ref(),&[pool.bump]];
+   let signer_seed=&[seeds];
     pool.total_lp_issued=pool.total_lp_issued.checked_add(mintamount).ok_or(CLMMError::ArithmeticOverflow)?;
      let account=MintTo{
           authority:ctx.accounts.config.to_account_info(),
           to:ctx.accounts.user_lp_account.to_account_info(),
           mint:ctx.accounts.lp_mint.to_account_info()
      };
-     let cpi_context=CpiContext::new(ctx.accounts.token_program.to_account_info(), account);
+     let cpi_context=CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), account,signer_seed);
       mint_to(cpi_context, mintamount)?;
 Ok(())
       }
