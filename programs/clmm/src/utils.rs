@@ -187,3 +187,83 @@ pub fn tick_to_sqrt_price_x64(tick: i32) -> Result<u128> {
 
     Ok(ratio as u128)
 }
+pub fn calculate_liquidity_amounts(
+    sqrt_price_current_x64: u128,
+    sqrt_price_lower_x64: u128,
+    sqrt_price_upper_x64: u128,
+    liquidity: u128,
+) -> Result<(u64, u64)> {
+    let amount_a: u64;
+    let amount_b: u64;
+
+    if sqrt_price_current_x64 <= sqrt_price_lower_x64 {
+        // Token A only: amount_a = L * (upper - lower) * Q64 / (upper * lower)
+        let numerator = liquidity
+            .checked_mul(
+                sqrt_price_upper_x64
+                    .checked_sub(sqrt_price_lower_x64)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_mul(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        let denominator = sqrt_price_upper_x64
+            .checked_mul(sqrt_price_lower_x64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        amount_a = (numerator / denominator)
+            .try_into()
+            .map_err(|_| CLMMError::ArithmeticOverflow)?;
+        amount_b = 0;
+    } else if sqrt_price_current_x64 >= sqrt_price_upper_x64 {
+        // Token B only: amount_b = L * (upper - lower) / Q64
+        amount_a = 0;
+        amount_b = (liquidity
+            .checked_mul(
+                sqrt_price_upper_x64
+                    .checked_sub(sqrt_price_lower_x64)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?)
+        .try_into()
+        .map_err(|_| CLMMError::ArithmeticOverflow)?;
+    } else {
+        // Both tokens:
+        // amount_a = L * (upper - current) * Q64 / (upper * current)
+        let numerator_a = liquidity
+            .checked_mul(
+                sqrt_price_upper_x64
+                    .checked_sub(sqrt_price_current_x64)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_mul(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        let denominator_a = sqrt_price_upper_x64
+            .checked_mul(sqrt_price_current_x64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        amount_a = (numerator_a / denominator_a)
+            .try_into()
+            .map_err(|_| CLMMError::ArithmeticOverflow)?;
+
+        // amount_b = L * (current - lower) / Q64
+        amount_b = (liquidity
+            .checked_mul(
+                sqrt_price_current_x64
+                    .checked_sub(sqrt_price_lower_x64)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?)
+        .try_into()
+        .map_err(|_| CLMMError::ArithmeticOverflow)?;
+    }
+
+    Ok((amount_a, amount_b))
+}
