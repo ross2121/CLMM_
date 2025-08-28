@@ -22,7 +22,7 @@ pub struct Liquidity<'info>{
     pub usertoken_account_b:InterfaceAccount<'info,TokenAccount>,
     #[account(init_if_needed,payer=signer,associated_token::mint=lp_mint,associated_token::authority=signer)]
      pub user_lp_account:InterfaceAccount<'info,TokenAccount> ,
-    #[account(init,associated_token::mint=minta,associated_token::authority=config,payer=signer)]
+    #[account(mut,associated_token::mint=minta,associated_token::authority=config)]
     pub vaulta:InterfaceAccount<'info, TokenAccount>,
     #[account(mut,seeds=[b"config",config.seed.to_le_bytes().as_ref()],bump)]
     pub config:Account<'info,Pool>,

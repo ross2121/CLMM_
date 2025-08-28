@@ -1,13 +1,9 @@
-use anchor_lang::prelude::*;
-
 use crate::error::CLMMError;
-
-
+use anchor_lang::prelude::*;
 
 const Q64: u128 = 1 << 64;
 pub const TICK_SPACING: i32 = 10;
 const BASE_SQRT_PRICE_X64: u128 = Q64;
-
 
 const SQRT_1_0001_X64: u128 = 18446758646477570048; // sqrt(1.0001) * 2^64
 pub const MIN_TICK: i32 = -443636;
@@ -17,6 +13,22 @@ pub const MIN_SQRT_PRICE_X64: u128 = 4295048016;
 /// The maximum value that can be returned from #get_sqrt_price_at_tick. Equivalent to get_sqrt_price_at_tick(MAX_TICK)
 pub const MAX_SQRT_PRICE_X64: u128 = 79226673521066979257578248091;
 const BIT_PRECISION: u32 = 16;
+
+pub fn integer_sqrt(value: u128) -> u64 {
+    if value == 0 {
+        return 0;
+    }
+
+    let mut x = value;
+    let mut y = (value + 1) / 2;
+
+    while y < x {
+        x = y;
+        y = (x + value / x) / 2;
+    }
+
+    x as u64
+}
 
 /// Convert a u64 price to sqrt_price_x64 format
 /// Formula: sqrt(price) * 2^64
@@ -40,61 +52,7 @@ pub fn price_to_sqrt_price_x64(price: u64) -> Result<u128> {
     Ok(sqrt_price_x64)
 }
 
-pub fn sqrt_price_x64_to_tick(sqrt_price_x64: u128) -> Result<i32> {
-    require!(
-        sqrt_price_x64 >= MIN_SQRT_PRICE_X64 && sqrt_price_x64 < MAX_SQRT_PRICE_X64,
-        CLMMError::SqrtPriceX64
-    );
-    // Determine log_b(sqrt_ratio). First by calculating integer portion (msb)
-    let msb: u32 = 128 - sqrt_price_x64.leading_zeros() - 1;
-    let log2p_integer_x32 = (msb as i128 - 64) << 32;
-
-    // get fractional value (r/2^msb), msb always > 128
-    // We begin the iteration from bit 63 (0.5 in Q64.64)
-    let mut bit: i128 = 0x8000_0000_0000_0000i128;
-    let mut precision = 0;
-    let mut log2p_fraction_x64 = 0;
-
-    // Log2 iterative approximation for the fractional part
-    // Go through each 2^(j) bit where j < 64 in a Q64.64 number
-    // Append current bit value to fraction result if r^2 Q2.126 is more than 2
-    let mut r = if msb >= 64 {
-        sqrt_price_x64 >> (msb - 63)
-    } else {
-        sqrt_price_x64 << (63 - msb)
-    };
-
-    while bit > 0 && precision < BIT_PRECISION {
-        r *= r;
-        let is_r_more_than_two = r >> 127 as u32;
-        r >>= 63 + is_r_more_than_two;
-        log2p_fraction_x64 += bit * is_r_more_than_two as i128;
-        bit >>= 1;
-        precision += 1;
-    }
-    let log2p_fraction_x32 = log2p_fraction_x64 >> 32;
-    let log2p_x32 = log2p_integer_x32 + log2p_fraction_x32;
-
-    // 14 bit refinement gives an error margin of 2^-14 / log2 (√1.0001) = 0.8461 < 1
-    // Since tick is a decimal, an error under 1 is acceptable
-
-    // Change of base rule: multiply with 2^16 / log2 (√1.0001)
-    let log_sqrt_10001_x64 = log2p_x32 * 59543866431248i128;
-
-    // tick - 0.01
-    let tick_low = ((log_sqrt_10001_x64 - 184467440737095516i128) >> 64) as i32;
-
-    // tick + (2^-14 / log2(√1.001)) + 0.01
-    let tick_high = ((log_sqrt_10001_x64 + 15793534762490258745i128) >> 64) as i32;
-
-    Ok(if tick_low == tick_high {
-        tick_low
-    } else if tick_to_sqrt_price_x64(tick_high)? <= sqrt_price_x64 {
-        tick_high
-    } else {
-        tick_low
-    })
-}
+// formula = sqrt(log(1.0001^tick)) * 2^64
 pub fn tick_to_sqrt_price_x64(tick: i32) -> Result<u128> {
     let abs_tick = tick.abs() as u32;
     require!(abs_tick <= MAX_TICK as u32, CLMMError::TickUpperOverflow);
@@ -187,6 +145,66 @@ pub fn tick_to_sqrt_price_x64(tick: i32) -> Result<u128> {
 
     Ok(ratio as u128)
 }
+
+// tick = log base(sqrt(1.0001) ( sqrt_price_x64 / Q64) )
+//to efficiently compute the above we find the log2 of above and divide by log(sqrt(1.0001))
+pub fn sqrt_price_x64_to_tick(sqrt_price_x64: u128) -> Result<i32> {
+    require!(
+        sqrt_price_x64 >= MIN_SQRT_PRICE_X64 && sqrt_price_x64 < MAX_SQRT_PRICE_X64,
+        CLMMError::SqrtPriceX64
+    );
+
+    // Determine log_b(sqrt_ratio). First by calculating integer portion (msb)
+    let msb: u32 = 128 - sqrt_price_x64.leading_zeros() - 1;
+    let log2p_integer_x32 = (msb as i128 - 64) << 32;
+
+    // get fractional value (r/2^msb), msb always > 128
+    // We begin the iteration from bit 63 (0.5 in Q64.64)
+    let mut bit: i128 = 0x8000_0000_0000_0000i128;
+    let mut precision = 0;
+    let mut log2p_fraction_x64 = 0;
+
+    // Log2 iterative approximation for the fractional part
+    // Go through each 2^(j) bit where j < 64 in a Q64.64 number
+    // Append current bit value to fraction result if r^2 Q2.126 is more than 2
+    let mut r = if msb >= 64 {
+        sqrt_price_x64 >> (msb - 63)
+    } else {
+        sqrt_price_x64 << (63 - msb)
+    };
+
+    while bit > 0 && precision < BIT_PRECISION {
+        r *= r;
+        let is_r_more_than_two = r >> 127 as u32;
+        r >>= 63 + is_r_more_than_two;
+        log2p_fraction_x64 += bit * is_r_more_than_two as i128;
+        bit >>= 1;
+        precision += 1;
+    }
+    let log2p_fraction_x32 = log2p_fraction_x64 >> 32;
+    let log2p_x32 = log2p_integer_x32 + log2p_fraction_x32;
+
+    // 14 bit refinement gives an error margin of 2^-14 / log2 (√1.0001) = 0.8461 < 1
+    // Since tick is a decimal, an error under 1 is acceptable
+
+    // Change of base rule: multiply with 2^16 / log2 (√1.0001)
+    let log_sqrt_10001_x64 = log2p_x32 * 59543866431248i128;
+
+    // tick - 0.01
+    let tick_low = ((log_sqrt_10001_x64 - 184467440737095516i128) >> 64) as i32;
+
+    // tick + (2^-14 / log2(√1.001)) + 0.01
+    let tick_high = ((log_sqrt_10001_x64 + 15793534762490258745i128) >> 64) as i32;
+
+    Ok(if tick_low == tick_high {
+        tick_low
+    } else if tick_to_sqrt_price_x64(tick_high)? <= sqrt_price_x64 {
+        tick_high
+    } else {
+        tick_low
+    })
+}
+
 pub fn calculate_liquidity_amounts(
     sqrt_price_current_x64: u128,
     sqrt_price_lower_x64: u128,
@@ -267,18 +285,122 @@ pub fn calculate_liquidity_amounts(
 
     Ok((amount_a, amount_b))
 }
-pub fn integer_sqrt(value: u128) -> u64 {
-    if value == 0 {
-        return 0;
+
+pub fn compute_swap_step(
+    sqrt_price_current_x64: u128,
+    sqrt_price_target_x64: u128,
+    liquidity: u128,
+    amount_remaining: u128,
+    a_to_b: bool,
+) -> Result<(u128, u128, u128)> {
+    let next_price: u128;
+    let amount_in: u128;
+    let amount_out: u128;
+
+    if a_to_b {
+        // Calculate required input for full step
+        let price_diff = sqrt_price_current_x64
+            .checked_sub(sqrt_price_target_x64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        let required_in = liquidity
+            .checked_mul(price_diff)
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_mul(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(
+                sqrt_price_current_x64
+                    .checked_mul(sqrt_price_target_x64)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        if amount_remaining >= required_in {
+            // Full step
+            next_price = sqrt_price_target_x64;
+            amount_in = required_in;
+        } else {
+            // Partial step
+            let numerator = liquidity
+                .checked_mul(sqrt_price_current_x64)
+                .ok_or(CLMMError::ArithmeticOverflow)?
+                .checked_mul(sqrt_price_current_x64)
+                .ok_or(CLMMError::ArithmeticOverflow)?;
+
+            let denominator = liquidity
+                .checked_mul(sqrt_price_current_x64)
+                .ok_or(CLMMError::ArithmeticOverflow)?
+                .checked_add(
+                    amount_remaining
+                        .checked_mul(sqrt_price_current_x64)
+                        .ok_or(CLMMError::ArithmeticOverflow)?
+                        .checked_div(Q64)
+                        .ok_or(CLMMError::ArithmeticOverflow)?,
+                )
+                .ok_or(CLMMError::ArithmeticOverflow)?;
+
+            next_price = numerator
+                .checked_div(denominator)
+                .ok_or(CLMMError::ArithmeticOverflow)?;
+            amount_in = amount_remaining;
+        }
+
+        // Calculate output
+        amount_out = liquidity
+            .checked_mul(
+                sqrt_price_current_x64
+                    .checked_sub(next_price)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+    } else {
+        // B to A swap
+        let price_diff = sqrt_price_target_x64
+            .checked_sub(sqrt_price_current_x64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        let required_in = liquidity
+            .checked_mul(price_diff)
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+
+        if amount_remaining >= required_in {
+            // Full step
+            next_price = sqrt_price_target_x64;
+            amount_in = required_in;
+        } else {
+            // Partial step
+            next_price = sqrt_price_current_x64
+                .checked_add(
+                    amount_remaining
+                        .checked_mul(Q64)
+                        .ok_or(CLMMError::ArithmeticOverflow)?
+                        .checked_div(liquidity)
+                        .ok_or(CLMMError::ArithmeticOverflow)?,
+                )
+                .ok_or(CLMMError::ArithmeticOverflow)?;
+            amount_in = amount_remaining;
+        }
+
+        // Calculate output
+        let price_diff_out = next_price
+            .checked_sub(sqrt_price_current_x64)
+            .ok_or(CLMMError::ArithmeticOverflow)?;
+        amount_out = liquidity
+            .checked_mul(price_diff_out)
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_mul(Q64)
+            .ok_or(CLMMError::ArithmeticOverflow)?
+            .checked_div(
+                sqrt_price_current_x64
+                    .checked_mul(next_price)
+                    .ok_or(CLMMError::ArithmeticOverflow)?,
+            )
+            .ok_or(CLMMError::ArithmeticOverflow)?;
     }
 
-    let mut x = value;
-    let mut y = (value + 1) / 2;
-
-    while y < x {
-        x = y;
-        y = (x + value / x) / 2;
-    }
-
-    x as u64
+    Ok((next_price, amount_in, amount_out))
 }
